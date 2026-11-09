@@ -395,6 +395,7 @@ export class HeadCam {
     }
 
     this.follow(dt);
+    if (this.needsSettle && this.hasPose) this.settleHair();
     this.avatar?.vrm.update(this.settings.springs ? dt : 0);
     this.renderer.render(this.scene, this.camera);
     this.composite(now, dt);
@@ -472,7 +473,27 @@ export class HeadCam {
     this.inner.scale.setScalar(s);
     this.body.scale.setScalar(s);
     this.inner.position.copy(this.eyeTarget()).sub(this.avatar.eyes.clone().multiplyScalar(s));
-    this.avatar.vrm.springBoneManager?.reset();
+    this.needsSettle = true;
+  }
+
+  /** set when the avatar jumps (new model, new size, first pose) — see {@link settleHair} */
+  private needsSettle = false;
+
+  /**
+   * Hair springs remember where the head was. After a jump — the model appearing at your
+   * face from the origin, or a new size — they'd whip up and fall back down. So: reset them
+   * at the head's real place, then run a second of physics with the head still before
+   * anyone sees a frame.
+   */
+  private settleHair() {
+    const vrm = this.avatar?.vrm;
+    const springs = vrm?.springBoneManager;
+    this.needsSettle = false;
+    if (!vrm || !springs) return;
+    vrm.humanoid.update();
+    this.scene.updateMatrixWorld(true);
+    springs.reset();
+    for (let i = 0; i < 60; i++) springs.update(1 / 60);
   }
 
   private follow(dt: number) {
@@ -489,8 +510,7 @@ export class HeadCam {
     this.anchor.scale.lerp(this.target.scale, k);
     if (!this.hasPose) {
       this.hasPose = true;
-      this.anchor.updateMatrixWorld(true);
-      this.avatar.vrm.springBoneManager?.reset();
+      this.needsSettle = true;
     }
     this.anchor.visible = this.settings.mode === "head";
     this.body.visible = this.settings.mode === "half";
