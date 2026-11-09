@@ -93,7 +93,8 @@ button.big { background: var(--yolk); font-size: 20px; padding: 12px 28px; }
 .chars-foot { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 14px; }
 .chars-foot .upload { cursor: pointer; font-size: 14px; min-height: 36px; padding: 4px 12px; }
 .chars-foot .upload.on { background: var(--yolk); }
-.chars-foot .sources { flex: 1 1 220px; padding-top: 6px; }
+.chars-foot .sources { flex: 0 1 auto; padding-top: 6px; }
+.chars-foot .sources[open] { flex: 1 1 100%; }
 .chars-foot .license { flex: 0 1 auto; margin-top: 4px; }
 
 .bgs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

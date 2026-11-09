@@ -1,17 +1,30 @@
 # AniMe
 
-**กล้องที่เปลี่ยนหัวเป็นอนิเมะ** · Your webcam, but your head turns anime.
+![AniMe: Mira and Ren, two of the characters](public/og.png)
 
-- **Head only:** an anime head on your real body, so hands and gestures stay yours.
-- **Half body:** an anime upper body replaces you.
+Your webcam, but you're an anime character, just the head or the whole upper body.
+
+**Try it free: https://anime.breakfastz.dev** · no sign-up · **everything runs in your browser; no image ever leaves your device.**
+
+| Desktop | Phone (9:16) |
+|---|---|
+| ![AniMe on a computer: Ren in half-body mode on the sky background](docs/screenshots/desktop.png) | ![AniMe on a phone: Mira in half-body mode on the pastel background](docs/screenshots/phone.png) |
+
+![Shorts mode: Fumiriya at 9:16 on the night background](docs/screenshots/desktop-night.png)
+
+## What it does
+
+- **Half body** (default): an anime upper body replaces you; your real self is erased from the room.
+- **Head only:** an anime head on your real body, so your hands and gestures stay yours.
 - Blinks, talks, smiles and looks around with you; hair swings.
-- Take photos or record clips in 16:9 or 9:16 (1080×1920) with your mic, then save or share.
+- 6 characters to pick from (male and female), or load your own `.vrm`.
+- Photos and clips in 16:9 or 9:16 (1080×1920) with your mic; pause and resume while recording; save or share straight to apps on phones.
 - Backgrounds: your room, pastel, sky, night, or a green screen.
-- Free, no sign-up. **Everything runs in your browser; no image ever leaves your device.**
-
-Live: https://anime.breakfastz.dev · Made for the [breakfastz](https://breakfastz.dev) channel, EP.006.
+- Privacy guard: if your face leaves the frame, the camera picture blurs.
 
 > Works best on a computer (Chrome, Edge, Safari) or a recent phone. Older or low-end phones may stutter or not run at all.
+
+Made for the [breakfastz](https://breakfastz.dev) channel, EP.006.
 
 ## How it works
 

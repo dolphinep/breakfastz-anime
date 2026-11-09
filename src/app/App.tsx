@@ -271,7 +271,7 @@ export function App() {
         <h1>
           {SITE.name} <span className="tag">beta</span>
         </h1>
-        <p className="sub">กล้องที่เปลี่ยนหัวเป็นอนิเมะ ฟรี ไม่ต้องสมัคร ภาพไม่ออกจากเครื่อง</p>
+        <p className="sub">ฟรี ไม่ต้องสมัคร ภาพไม่ออกจากเครื่อง</p>
       </header>
 
       <main className="layout">
