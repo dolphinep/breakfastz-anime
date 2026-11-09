@@ -1,54 +1,65 @@
-# Anime Head
+# AniMe
 
-Your webcam, but **only your head turns anime**. Your body, hands and gestures stay real, so viewers feel they're talking to a real person, without ever seeing your face.
+**กล้องที่เปลี่ยนหัวเป็นอนิเมะ** · Your webcam, but your head turns anime.
 
-Runs entirely in the browser. No video leaves your machine.
+- **Head only:** an anime head on your real body, so hands and gestures stay yours.
+- **Half body:** an anime upper body replaces you.
+- Blinks, talks, smiles and looks around with you; hair swings.
+- Take photos or record clips in 16:9 or 9:16 (1080×1920) with your mic, then save or share.
+- Backgrounds: your room, pastel, sky, night, or a green screen.
+- Free, no sign-up. **Everything runs in your browser; no image ever leaves your device.**
 
-Made for the [breakfastz](https://breakfastz.dev) channel, EP.006.
+Live: https://anime.breakfastz.dev · Made for the [breakfastz](https://breakfastz.dev) channel, EP.006.
+
+> Works best on a computer (Chrome, Edge, Safari) or a recent phone. Older or low-end phones may stutter or not run at all.
 
 ## How it works
 
 ```
-webcam → MediaPipe Face Landmarker ─┬─ facial transformation matrix → head pose (position + rotation)
-                                    ├─ 52 blendshapes → VRM expressions (blink, mouth shapes, smile, brows) + eye look
-                                    └─ iris landmarks → one-off calibration (where your eyes are, how big your face is)
-                                             │
-three.js + three-vrm renders ONLY the head of a VRM avatar on a transparent canvas, with a camera
-that matches MediaPipe's own (63° vertical FOV) so the pose matrix can be applied as-is
-                                             │
-2D canvas composites: camera frame (or green screen) + head → preview + MediaRecorder (MP4/WebM)
+webcam → MediaPipe Face Landmarker ─┬─ facial transformation matrix → head pose
+                                    ├─ 52 blendshapes → VRM expressions + eye look
+                                    └─ iris landmarks → one-off calibration (eye position, face size)
+       → MediaPipe Image Segmenter (half body / fun backgrounds) → cut you out of the room
+three.js + three-vrm draws the VRM with a camera matching MediaPipe's (63° vertical FOV),
+so the pose matrix applies as-is. The scene is in metres so VRM spring bones behave.
+2D canvas composites background + you (or the room) + avatar + watermark → preview, PNG, MediaRecorder
 ```
 
-- **Two modes:** *head only* (your real body stays) or *half body* (an anime upper body replaces yours: MediaPipe's selfie segmenter erases you and fills the area with a clean plate of the room, captured on demand or learned from every pixel that isn't you; the body turns a little with your head, neck and head take the rest).
-- **Head only, any VRM:** triangles are kept when all three vertices are mostly skinned to the head bone or its children (`src/lib/headOnly.ts`), so no mesh names are assumed.
-- **Expressions:** `src/lib/expressions.ts` maps ARKit-style blendshapes to VRM presets (`aa ih ou ee oh`, blinks, `happy`, `angry`, `surprised`).
-- **Privacy guard:** whenever the face is lost (or before calibration) the whole picture is blurred, so your real face never shows in a recording.
-- **Shorts mode:** 9:16 at 1080×1920; the crop follows your face slowly.
-- **License check:** the model's own VRM license is shown (can it be used in a monetised channel? credit needed?).
+- **Any VRM, head only:** triangles mostly skinned to the head bone are kept (`src/lib/headOnly.ts`), so mesh names don't matter. Long hair can be cut at a height.
+- **Half body:** the body turns a little with your head; neck and head take the rest. The real you is replaced by a clean plate of the room (3-2-1 capture, or learned from pixels that aren't you).
+- **Privacy guard:** whenever the face is lost (or before calibration) the camera picture is blurred.
+- **License check:** the model's own VRM license is shown (monetised use allowed? credit needed?).
 
 ## Run
 
 ```sh
 bun install
-bun run dev      # http://localhost:5173, allow the camera
-bun run test     # unit tests
-bun run build
+bun run dev      # allow the camera
+bun run test
+bun run build    # static site in dist/ (Cloudflare Pages)
 ```
 
-## Your own head
+## Characters
 
-Make one for free in [VRoid Studio](https://vroid.com/en/studio) and export `.vrm`, or pick one on [VRoid Hub](https://hub.vroid.com/) / Booth. Always read the model's license before using it in videos.
+Bundled in `public/avatars/` (textures shrunk to ≤1024 px with `scripts/slim-models.mjs`):
 
-Bundled characters (switch in the app):
-- `public/models/sample.vrm`: `VRM1_Constraint_Twist_Sample` by pixiv Inc. from [three-vrm](https://github.com/pixiv/three-vrm) (VRM Public License 1.0: commercial use and redistribution allowed, credit not required). Committed.
-- Sakurada Fumiriya and HairSample_Male (male), Darkness Shibu and Sendagaya Shino (female): VRoid Studio beta samples released by pixiv under **CC0** (license also stored in each file). 15–20 MB each, so `scripts/fetch-models.mjs` downloads them (pinned commit + SHA-256) from [madjin/vrm-samples](https://github.com/madjin/vrm-samples) on `dev` / `build`.
+| file | name in app | license |
+|---|---|---|
+| `fumiriya.vrm` | Fumiriya | CC0: VRoid Studio sample "Sakurada Fumiriya" by pixiv |
+| `hairmale.vrm` | Kuro | CC0: VRoid Studio sample "HairSample_Male" by pixiv |
+| `pixiv.vrm` | Mira | VRM Public License 1.0: `VRM1_Constraint_Twist_Sample` by pixiv Inc. ([three-vrm](https://github.com/pixiv/three-vrm)); commercial use and redistribution allowed, no credit required |
+| `shibu.vrm` | Shibu | CC0: VRoid Studio sample "Darkness Shibu" by pixiv |
+| `shino.vrm` | Shino | CC0: VRoid Studio sample "Sendagaya Shino" by pixiv |
 
+The CC0 files came from [madjin/vrm-samples](https://github.com/madjin/vrm-samples); the license is also stored in each file's VRM meta.
+
+Make your own for free in [VRoid Studio](https://vroid.com/en/studio), or find more on [VRoid Hub](https://hub.vroid.com/), [Open Source Avatars](https://www.opensourceavatars.com/) and Booth. Always read a model's license before using it.
 
 ## Credits
 
-- [MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) and [Image Segmenter](https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter) (Apache-2.0). `face_landmarker.task` and `selfie_segmenter.tflite` are bundled in `public/models/`
+- [MediaPipe](https://ai.google.dev/edge/mediapipe) Face Landmarker + Image Segmenter (Apache-2.0); `face_landmarker.task` and `selfie_segmenter.tflite` are in `public/models/`
 - [three.js](https://threejs.org/) (MIT) · [@pixiv/three-vrm](https://github.com/pixiv/three-vrm) (MIT)
 
 ## License
 
-MIT
+Code: MIT. Characters: see the table above.

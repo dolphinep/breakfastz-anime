@@ -14,4 +14,3 @@ test-results/
 tests/.results/
 playwright-report/
 public/mediapipe/
-public/models/cc0/

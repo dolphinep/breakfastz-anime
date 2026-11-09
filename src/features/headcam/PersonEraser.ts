@@ -16,6 +16,7 @@ export class PersonEraser {
   private layer = document.createElement("canvas");
   private scratch = document.createElement("canvas");
   private hasPlate = false;
+  private video: HTMLVideoElement | null = null;
   /** true once a clean plate was captured with nobody in frame */
   clean = false;
 
@@ -34,6 +35,7 @@ export class PersonEraser {
   /** segment the current frame and keep the plate up to date */
   update(video: HTMLVideoElement, now: number): void {
     if (!this.segmenter) return;
+    this.video = video;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     fit(this.plate, vw, vh);
@@ -98,6 +100,23 @@ export class PersonEraser {
     lctx.globalCompositeOperation = "destination-in";
     lctx.filter = `blur(${Math.round(vh / 70)}px)`;
     lctx.drawImage(this.mask, 0, 0, vw, vh);
+    lctx.drawImage(this.mask, 0, 0, vw, vh);
+    lctx.filter = "none";
+    lctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(this.layer, sx, 0, sw, sh, 0, 0, W, H);
+  }
+
+  /** draw only you (the real camera, cut out of the room) — for head mode on a fun background */
+  drawPerson(ctx: CanvasRenderingContext2D, sx: number, sw: number, sh: number, W: number, H: number): void {
+    if (!this.video || !this.mask.width) return;
+    const vw = this.layer.width;
+    const vh = this.layer.height;
+    const lctx = this.layer.getContext("2d")!;
+    lctx.globalCompositeOperation = "source-over";
+    lctx.clearRect(0, 0, vw, vh);
+    lctx.drawImage(this.video, 0, 0, vw, vh);
+    lctx.globalCompositeOperation = "destination-in";
+    lctx.filter = `blur(${Math.round(vh / 200)}px)`;
     lctx.drawImage(this.mask, 0, 0, vw, vh);
     lctx.filter = "none";
     lctx.globalCompositeOperation = "source-over";

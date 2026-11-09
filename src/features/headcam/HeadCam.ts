@@ -24,7 +24,16 @@ const CALIBRATION_FRAMES = 15;
 const LOST_AFTER_MS = 250;
 const AVERAGE_IPD_CM = 6.3;
 
-export type Background = "camera" | "green";
+/** camera = your real room · the rest cut you out (head mode) or replace you (half mode) */
+export type Background = "camera" | "pastel" | "sky" | "night" | "green";
+export type Quality = "hd" | "sd";
+
+const BACKGROUNDS: Record<Exclude<Background, "camera">, string[]> = {
+  pastel: ["#ffe0ec", "#fff4c2"],
+  sky: ["#bfe6ff", "#e8f7ff"],
+  night: ["#2b1b4a", "#6a3d8f"],
+  green: ["#00b140", "#00b140"],
+};
 export type Aspect = "16:9" | "9:16";
 /** head = only your head turns anime · half = an anime upper body replaces yours */
 export type Mode = "head" | "half";
@@ -43,6 +52,10 @@ export interface HeadCamSettings {
   background: Background;
   /** blur the whole picture whenever the face is lost, so the real face never shows */
   privacyBlur: boolean;
+  /** small breakfastz.dev mark in the corner of photos and clips */
+  watermark: boolean;
+  /** hd = 1080p camera + 1080×1920 Shorts · sd = 720p, for phones and slower computers */
+  quality: Quality;
   /** let hair and accessories swing (VRM spring bones) */
   springs: boolean;
   /** how far below the avatar's eyes hair may hang, in model cm (bigger = longer; ≥ HAIR_UNCUT = no cut) */
@@ -61,6 +74,8 @@ export const DEFAULT_SETTINGS: HeadCamSettings = {
   aspect: "16:9",
   background: "camera",
   privacyBlur: true,
+  watermark: true,
+  quality: "hd",
   springs: true,
   hair: 12,
 };
@@ -168,11 +183,12 @@ export class HeadCam {
 
   /** ask for the webcam and load the face tracker */
   async start(deviceId?: string): Promise<void> {
+    for (const t of this.stream?.getTracks() ?? []) t.stop();
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: this.settings.quality === "hd" ? 1920 : 1280 },
+        height: { ideal: this.settings.quality === "hd" ? 1080 : 720 },
         frameRate: { ideal: 30 },
         facingMode: "user",
       },
@@ -196,10 +212,15 @@ export class HeadCam {
       // GPU is much faster; fall back to CPU where WebGL2 compute isn't available
       this.landmarker = await create("GPU").catch(() => create("CPU"));
     }
-    if (this.settings.mode === "half") await this.initEraser();
+    if (this.needsEraser()) await this.initEraser();
     this.resize();
     cancelAnimationFrame(this.raf);
     this.loop();
+  }
+
+  /** cutting you out is only needed when your real room isn't the background */
+  private needsEraser(): boolean {
+    return this.settings.mode === "half" || this.settings.background !== "camera";
   }
 
   private async initEraser() {
@@ -214,13 +235,13 @@ export class HeadCam {
   }
 
   /** load a .vrm from a URL or a file the user picked */
-  async loadVrm(source: string | File): Promise<void> {
+  async loadVrm(source: string | File, onProgress?: (fraction: number) => void): Promise<void> {
     const url = typeof source === "string" ? source : URL.createObjectURL(source);
     const name = typeof source === "string" ? (source.split("/").pop() ?? source) : source.name;
     try {
       const loader = new GLTFLoader();
       loader.register((parser) => new VRMLoaderPlugin(parser));
-      const gltf = await loader.loadAsync(url);
+      const gltf = await loader.loadAsync(url, (e) => e.total && onProgress?.(e.loaded / e.total));
       const vrm = gltf.userData.vrm as VRM | undefined;
       if (!vrm) throw new Error("This file has no VRM data");
 
@@ -262,9 +283,9 @@ export class HeadCam {
   update(patch: Partial<HeadCamSettings>): void {
     const prev = this.settings;
     this.settings = { ...this.settings, ...patch };
+    if (this.needsEraser()) void this.initEraser();
     if (patch.mode && patch.mode !== prev.mode) {
       this.applyMode();
-      if (patch.mode === "half") void this.initEraser();
     } else if (patch.hair !== undefined) this.applyCut();
     this.place();
   }
@@ -304,12 +325,22 @@ export class HeadCam {
   }
 
   /** record the composited picture (and the mic, if asked) */
+  private micReady: Promise<MediaStream> | null = null;
+
+  /** open the mic ahead of time (e.g. during the countdown) so recording starts on the beat */
+  prepareMic(): void {
+    this.micReady ??= navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: false },
+    });
+    this.micReady.catch(() => (this.micReady = null));
+  }
+
   async startRecording(withMic: boolean): Promise<void> {
     const stream = this.output.captureStream(30);
     if (withMic) {
-      const mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: false },
-      });
+      this.prepareMic();
+      const mic = await this.micReady!;
+      this.micReady = null;
       for (const t of mic.getAudioTracks()) stream.addTrack(t);
     }
     const mimeType = pickMime();
@@ -360,7 +391,7 @@ export class HeadCam {
     if (this.video.readyState >= 2 && this.video.currentTime !== this.lastVideoTime && this.landmarker) {
       this.lastVideoTime = this.video.currentTime;
       this.onResult(this.landmarker.detectForVideo(this.video, now), now);
-      if (this.settings.mode === "half") this.eraser.update(this.video, now);
+      if (this.needsEraser()) this.eraser.update(this.video, now);
     }
 
     this.follow(dt);
@@ -522,8 +553,9 @@ export class HeadCam {
     const vw = this.video.videoWidth || 1280;
     const vh = this.video.videoHeight || 720;
     const tall = this.settings.aspect === "9:16";
-    this.output.height = tall ? 1920 : vh;
-    this.output.width = tall ? 1080 : vw;
+    const long = this.settings.quality === "hd" ? 1920 : 1280;
+    this.output.height = tall ? long : vh;
+    this.output.width = tall ? Math.round((long * 9) / 16) : vw;
     this.outScale = this.output.height / vh;
     // render the head at output resolution so it stays sharp even when the video is upscaled
     this.renderer.setPixelRatio(1);
@@ -531,7 +563,7 @@ export class HeadCam {
     this.camera.aspect = vw / vh;
     this.camera.updateProjectionMatrix();
     this.cropX = -1;
-    this.sized = `${vw}x${vh}:${this.settings.aspect}`;
+    this.sized = `${vw}x${vh}:${this.settings.aspect}:${this.settings.quality}`;
   }
 
   private cropX = -1;
@@ -542,7 +574,7 @@ export class HeadCam {
     const vw = this.video.videoWidth;
     const vh = this.video.videoHeight;
     if (!vw || !vh) return;
-    if (this.sized !== `${vw}x${vh}:${this.settings.aspect}`) this.resize();
+    if (this.sized !== `${vw}x${vh}:${this.settings.aspect}:${this.settings.quality}`) this.resize();
 
     const W = this.output.width;
     const H = this.output.height;
@@ -561,18 +593,36 @@ export class HeadCam {
       ctx.translate(W, 0);
       ctx.scale(-1, 1);
     }
-    if (this.settings.background === "green") {
-      ctx.fillStyle = "#00b140";
-      ctx.fillRect(0, 0, W, H);
-    } else {
-      if (hide) ctx.filter = `blur(${Math.round(H / 18)}px)`;
+    const blur = `blur(${Math.round(H / 18)}px)`;
+    const bg = this.settings.background;
+    if (bg === "camera") {
+      if (hide) ctx.filter = blur;
       ctx.drawImage(this.video, sx, 0, sw, vh, 0, 0, W, H);
       ctx.filter = "none";
       if (half && !hide) this.eraser.draw(ctx, sx, sw, vh, W, H);
+    } else {
+      const [a, b] = BACKGROUNDS[bg];
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, a);
+      grad.addColorStop(1, b);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      // head mode keeps your real body, cut out of the room
+      if (!half) {
+        if (hide) ctx.filter = blur;
+        this.eraser.drawPerson(ctx, sx, sw, vh, W, H);
+        ctx.filter = "none";
+      }
     }
     const g = this.outScale;
     if (this.anchor.visible || this.body.visible) ctx.drawImage(this.renderer.domElement, sx * g, 0, sw * g, vh * g, 0, 0, W, H);
     ctx.restore();
+    if (this.settings.watermark) drawWatermark(ctx, W, H);
+  }
+
+  /** a still of exactly what the preview shows */
+  snapshot(): Promise<Blob | null> {
+    return new Promise((resolve) => this.output.toBlob(resolve, "image/png"));
   }
 
   private emitStatus(force = false) {
@@ -636,6 +686,22 @@ function eyeMidWorld(vrm: VRM, restEyes: THREE.Vector3, body: THREE.Object3D): T
   const r = vrm.humanoid.getRawBoneNode("rightEye");
   if (l && r) return l.getWorldPosition(new THREE.Vector3()).add(r.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
   return body.localToWorld(restEyes.clone());
+}
+
+function drawWatermark(ctx: CanvasRenderingContext2D, W: number, H: number) {
+  const size = Math.round(Math.min(W, H) * 0.028);
+  ctx.save();
+  ctx.font = `600 ${size}px Fredoka, Mitr, sans-serif`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.lineWidth = Math.max(2, size / 6);
+  ctx.strokeStyle = "rgba(42, 15, 8, 0.55)";
+  ctx.fillStyle = "rgba(255, 253, 245, 0.92)";
+  const x = W - size;
+  const y = H - size;
+  ctx.strokeText("breakfastz.dev", x, y);
+  ctx.fillText("breakfastz.dev", x, y);
+  ctx.restore();
 }
 
 function readLicense(vrm: VRM): ModelLicense {
