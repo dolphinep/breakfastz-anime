@@ -3,7 +3,7 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DEFAULT_TUNING, mapExpression, toBlendshapes, type FaceExpression } from "../../lib/expressions";
-import { keepHeadOnly } from "../../lib/headOnly";
+import { cutBelow, keepHeadOnly, type HeadPart } from "../../lib/headOnly";
 
 /**
  * MediaPipe's face geometry assumes a pinhole camera with this vertical field of view
@@ -39,7 +39,11 @@ export interface HeadCamSettings {
   privacyBlur: boolean;
   /** let hair and accessories swing (VRM spring bones) */
   springs: boolean;
+  /** how far below the avatar's eyes hair may hang, in model cm (bigger = longer; ≥ HAIR_UNCUT = no cut) */
+  hair: number;
 }
+
+export const HAIR_UNCUT = 40;
 
 export const DEFAULT_SETTINGS: HeadCamSettings = {
   size: 1.15,
@@ -51,6 +55,7 @@ export const DEFAULT_SETTINGS: HeadCamSettings = {
   background: "camera",
   privacyBlur: true,
   springs: true,
+  hair: 12,
 };
 
 export interface HeadCamStatus {
@@ -84,6 +89,7 @@ interface Avatar {
   /** eye midpoint and eye distance of the avatar at rest (model units = metres) */
   eyes: THREE.Vector3;
   ipd: number;
+  parts: HeadPart[];
 }
 
 export class HeadCam {
@@ -97,7 +103,10 @@ export class HeadCam {
 
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(MP_FOV, 16 / 9, 1, 10000);
+  // the scene is in metres (VRM's unit — spring bone stiffness, gravity and colliders assume it);
+  // MediaPipe's centimetre poses live under `world`, scaled by 0.01 around the camera
+  private camera = new THREE.PerspectiveCamera(MP_FOV, 16 / 9, 0.01, 100);
+  private world = new THREE.Group();
   /** follows the tracked face pose */
   private anchor = new THREE.Group();
   /** places the avatar inside the face space (scale + offset from calibration) */
@@ -133,7 +142,9 @@ export class HeadCam {
     this.scene.add(light, new THREE.AmbientLight(0xffffff, 0.4));
     this.anchor.add(this.inner);
     this.anchor.visible = false;
-    this.scene.add(this.anchor);
+    this.world.scale.setScalar(0.01);
+    this.world.add(this.anchor);
+    this.scene.add(this.world);
 
     this.video.muted = true;
     this.video.playsInline = true;
@@ -190,7 +201,7 @@ export class HeadCam {
 
       const head = vrm.humanoid.getRawBoneNode("head");
       if (!head) throw new Error("This VRM has no head bone");
-      keepHeadOnly(vrm.scene, head);
+      const parts = keepHeadOnly(vrm.scene, head);
 
       if (vrm.lookAt) vrm.lookAt.autoUpdate = false;
 
@@ -201,7 +212,8 @@ export class HeadCam {
         this.inner.remove(this.avatar.vrm.scene);
         VRMUtils.deepDispose(this.avatar.vrm.scene);
       }
-      this.avatar = { vrm, name, eyes, ipd, license: readLicense(vrm) };
+      this.avatar = { vrm, name, eyes, ipd, license: readLicense(vrm), parts };
+      this.applyHair();
       this.inner.add(vrm.scene);
       this.place();
       this.emitStatus(true);
@@ -219,7 +231,15 @@ export class HeadCam {
 
   update(patch: Partial<HeadCamSettings>): void {
     this.settings = { ...this.settings, ...patch };
+    if (patch.hair !== undefined) this.applyHair();
     this.place();
+  }
+
+  /** trim hair that would hang over your neck and shoulders */
+  private applyHair() {
+    if (!this.avatar) return;
+    const h = this.settings.hair;
+    cutBelow(this.avatar.parts, h >= HAIR_UNCUT ? -Infinity : this.avatar.eyes.y - h / 100);
   }
 
   async listCameras(): Promise<MediaDeviceInfo[]> {

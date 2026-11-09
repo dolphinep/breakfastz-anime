@@ -1,6 +1,6 @@
 import { Camera, Circle, Download, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_SETTINGS, HeadCam, type HeadCamSettings, type HeadCamStatus } from "@/features/headcam/HeadCam";
+import { DEFAULT_SETTINGS, HAIR_UNCUT, HeadCam, type HeadCamSettings, type HeadCamStatus } from "@/features/headcam/HeadCam";
 import { SITE } from "@/config/site";
 
 const SAMPLE_MODEL = `${import.meta.env.BASE_URL}models/sample.vrm`;
@@ -165,6 +165,7 @@ export function App() {
             <Slider label="ขนาดหัว" min={0.6} max={2} step={0.05} value={settings.size} onChange={(v) => set("size", v)} fmt={(v) => `${v.toFixed(2)}×`} />
             <Slider label="ขึ้น / ลง" min={-8} max={8} step={0.25} value={settings.offsetY} onChange={(v) => set("offsetY", v)} fmt={(v) => `${v} cm`} />
             <Slider label="หน้า / หลัง" min={-10} max={6} step={0.25} value={settings.offsetZ} onChange={(v) => set("offsetZ", v)} fmt={(v) => `${v} cm`} />
+            <Slider label="ความยาวผม" min={6} max={HAIR_UNCUT} step={1} value={settings.hair} onChange={(v) => set("hair", v)} fmt={(v) => (v >= HAIR_UNCUT ? "ไม่ตัด" : `${v} cm ใต้ตา`)} />
             <Slider label="ความนุ่ม" min={0} max={0.9} step={0.05} value={settings.smoothing} onChange={(v) => set("smoothing", v)} fmt={(v) => v.toFixed(2)} />
             <button disabled={!status.face} onClick={() => camRef.current?.recalibrate()}>
               <RefreshCw size={16} /> วัดหน้าใหม่
