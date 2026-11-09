@@ -41,7 +41,7 @@ Make one for free in [VRoid Studio](https://vroid.com/en/studio) and export `.vr
 
 Bundled characters (switch in the app):
 - `public/models/sample.vrm`: `VRM1_Constraint_Twist_Sample` by pixiv Inc. from [three-vrm](https://github.com/pixiv/three-vrm) (VRM Public License 1.0: commercial use and redistribution allowed, credit not required). Committed.
-- Sakurada Fumiriya, Darkness Shibu (male) and Sendagaya Shino: VRoid Studio beta samples released by pixiv under **CC0** (license also stored in each file). 15–20 MB each, so `scripts/fetch-models.mjs` downloads them (pinned commit + SHA-256) from [madjin/vrm-samples](https://github.com/madjin/vrm-samples) on `dev` / `build`.
+- Sakurada Fumiriya and HairSample_Male (male), Darkness Shibu and Sendagaya Shino (female): VRoid Studio beta samples released by pixiv under **CC0** (license also stored in each file). 15–20 MB each, so `scripts/fetch-models.mjs` downloads them (pinned commit + SHA-256) from [madjin/vrm-samples](https://github.com/madjin/vrm-samples) on `dev` / `build`.
 
 
 ## Credits

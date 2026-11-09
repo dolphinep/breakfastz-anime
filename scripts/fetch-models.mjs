@@ -7,6 +7,7 @@ const REPO = "https://github.com/madjin/vrm-samples/raw/e16eb187100149a315ad92c3
 const MODELS = {
   "Sakurada_Fumiriya.vrm": "d8fb05f33e377df028cb6b9d58c441ce68326c41fa23f6c735d40c65ae3dc710",
   "Darkness_Shibu.vrm": "0b50573d2d054d98c0a6fc5a5ce872e1b2c8bff8718476ff72a9a68c48674fd8",
+  "HairSample_Male.vrm": "7aeca142dabbc26ba0f5b9c998c8f3cb6df341287d67788427ac837223785a3f",
   "Sendagaya_Shino.vrm": "1e177c1a7b14f783a9c48395831db8616260d3bddd4154cb2784b779adca49b5",
 };
 
