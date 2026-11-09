@@ -65,3 +65,8 @@ button.big.stop { background: var(--bad); color: var(--white); }
 .license { margin: 0; font-size: 13px; border: 2px solid var(--ink); border-radius: 10px; padding: 4px 8px; }
 .license.ok { background: #d8f1e3; }
 .license.no { background: #fbd9dd; }
+.models { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.models .toggle { font-size: 13px; padding: 6px 8px; }
+.slider.off { opacity: 0.4; }
+.countdown { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; font: 700 120px "Fredoka", sans-serif; color: var(--white); background: rgba(42, 15, 8, 0.45); }
+.countdown span { font: 500 20px "Mitr", sans-serif; }

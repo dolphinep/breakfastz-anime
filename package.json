@@ -7,8 +7,8 @@
   "author": "dolphinep (breakfastz)",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/copy-wasm.mjs && vite",
-    "build": "node scripts/copy-wasm.mjs && tsc -b && vite build",
+    "dev": "node scripts/copy-wasm.mjs && node scripts/fetch-models.mjs && vite",
+    "build": "node scripts/copy-wasm.mjs && node scripts/fetch-models.mjs && tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run src",

@@ -1,9 +1,12 @@
 import { FaceLandmarker, FilesetResolver, type FaceLandmarkerResult } from "@mediapipe/tasks-vision";
+
+type WasmFileset = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DEFAULT_TUNING, mapExpression, toBlendshapes, type FaceExpression } from "../../lib/expressions";
-import { cutBelow, keepHeadOnly, type HeadPart } from "../../lib/headOnly";
+import { indexAvatar, showParts, type AvatarParts } from "../../lib/headOnly";
+import { PersonEraser } from "./PersonEraser";
 
 /**
  * MediaPipe's face geometry assumes a pinhole camera with this vertical field of view
@@ -23,8 +26,11 @@ const AVERAGE_IPD_CM = 6.3;
 
 export type Background = "camera" | "green";
 export type Aspect = "16:9" | "9:16";
+/** head = only your head turns anime · half = an anime upper body replaces yours */
+export type Mode = "head" | "half";
 
 export interface HeadCamSettings {
+  mode: Mode;
   /** avatar head size: 1 = the model's own (life-size) proportions, scaled to your face */
   size: number;
   /** nudge the head up/down and toward/away from the camera, in cm */
@@ -46,6 +52,7 @@ export interface HeadCamSettings {
 export const HAIR_UNCUT = 40;
 
 export const DEFAULT_SETTINGS: HeadCamSettings = {
+  mode: "head",
   size: 1.15,
   offsetY: 0,
   offsetZ: -4,
@@ -65,6 +72,8 @@ export interface HeadCamStatus {
   model: string | null;
   /** what the model's own license says about use in monetised videos */
   license: ModelLicense | null;
+  /** half mode: was an empty-room picture captured? */
+  cleanPlate: boolean;
 }
 
 export interface ModelLicense {
@@ -89,7 +98,9 @@ interface Avatar {
   /** eye midpoint and eye distance of the avatar at rest (model units = metres) */
   eyes: THREE.Vector3;
   ipd: number;
-  parts: HeadPart[];
+  parts: AvatarParts;
+  /** rest height of the hips (model units) — half mode shows everything above */
+  hipsY: number;
 }
 
 export class HeadCam {
@@ -111,6 +122,10 @@ export class HeadCam {
   private anchor = new THREE.Group();
   /** places the avatar inside the face space (scale + offset from calibration) */
   private inner = new THREE.Group();
+  /** half mode: holds the whole avatar upright in camera space */
+  private body = new THREE.Group();
+  private eraser = new PersonEraser();
+  private fileset: WasmFileset | null = null;
   private avatar: Avatar | null = null;
 
   private calibration: Calibration | null = null;
@@ -143,7 +158,7 @@ export class HeadCam {
     this.anchor.add(this.inner);
     this.anchor.visible = false;
     this.world.scale.setScalar(0.01);
-    this.world.add(this.anchor);
+    this.world.add(this.anchor, this.body);
     this.scene.add(this.world);
 
     this.video.muted = true;
@@ -169,6 +184,7 @@ export class HeadCam {
     if (!this.landmarker) {
       const base = import.meta.env.BASE_URL;
       const fileset = await FilesetResolver.forVisionTasks(`${base}mediapipe`);
+      this.fileset = fileset;
       const create = (delegate: "GPU" | "CPU") =>
         FaceLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: `${base}models/face_landmarker.task`, delegate },
@@ -180,8 +196,21 @@ export class HeadCam {
       // GPU is much faster; fall back to CPU where WebGL2 compute isn't available
       this.landmarker = await create("GPU").catch(() => create("CPU"));
     }
+    if (this.settings.mode === "half") await this.initEraser();
     this.resize();
+    cancelAnimationFrame(this.raf);
     this.loop();
+  }
+
+  private async initEraser() {
+    if (!this.fileset) return;
+    await this.eraser.init(this.fileset, `${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`);
+  }
+
+  /** half mode: grab the empty room as the background (step out of frame first) */
+  capturePlate(): void {
+    this.eraser.capturePlate(this.video);
+    this.emitStatus(true);
   }
 
   /** load a .vrm from a URL or a file the user picked */
@@ -201,7 +230,9 @@ export class HeadCam {
 
       const head = vrm.humanoid.getRawBoneNode("head");
       if (!head) throw new Error("This VRM has no head bone");
-      const parts = keepHeadOnly(vrm.scene, head);
+      const parts = indexAvatar(vrm.scene, head);
+      const hips = vrm.humanoid.getRawBoneNode("hips");
+      const hipsY = hips ? hips.getWorldPosition(new THREE.Vector3()).y : 0.9;
 
       if (vrm.lookAt) vrm.lookAt.autoUpdate = false;
 
@@ -209,13 +240,12 @@ export class HeadCam {
       const { eyes, ipd } = measureEyes(vrm, head);
 
       if (this.avatar) {
-        this.inner.remove(this.avatar.vrm.scene);
+        this.avatar.vrm.scene.removeFromParent();
         VRMUtils.deepDispose(this.avatar.vrm.scene);
       }
-      this.avatar = { vrm, name, eyes, ipd, license: readLicense(vrm), parts };
-      this.applyHair();
-      this.inner.add(vrm.scene);
-      this.place();
+      this.avatar = { vrm, name, eyes, ipd, license: readLicense(vrm), parts, hipsY };
+      this.shown = {};
+      this.applyMode();
       this.emitStatus(true);
     } finally {
       if (typeof source !== "string") URL.revokeObjectURL(url);
@@ -230,16 +260,37 @@ export class HeadCam {
   }
 
   update(patch: Partial<HeadCamSettings>): void {
+    const prev = this.settings;
     this.settings = { ...this.settings, ...patch };
-    if (patch.hair !== undefined) this.applyHair();
+    if (patch.mode && patch.mode !== prev.mode) {
+      this.applyMode();
+      if (patch.mode === "half") void this.initEraser();
+    } else if (patch.hair !== undefined) this.applyCut();
     this.place();
   }
 
-  /** trim hair that would hang over your neck and shoulders */
-  private applyHair() {
+  /** move the avatar between the head rig and the body rig, and show the right triangles */
+  private applyMode() {
     if (!this.avatar) return;
+    const { vrm } = this.avatar;
+    const half = this.settings.mode === "half";
+    (half ? this.body : this.inner).add(vrm.scene);
+    vrm.scene.position.set(0, 0, 0);
+    vrm.humanoid.resetNormalizedPose();
+    if (half) poseArmsDown(vrm);
+    this.applyCut();
+    this.place();
+  }
+
+  /** head mode: trim hair over your neck and shoulders · half mode: everything above the hips */
+  private applyCut() {
+    if (!this.avatar) return;
+    if (this.settings.mode === "half") {
+      showParts(this.avatar.parts, { headOnly: false, minY: this.avatar.hipsY - 0.04 });
+      return;
+    }
     const h = this.settings.hair;
-    cutBelow(this.avatar.parts, h >= HAIR_UNCUT ? -Infinity : this.avatar.eyes.y - h / 100);
+    showParts(this.avatar.parts, { headOnly: true, minY: h >= HAIR_UNCUT ? -Infinity : this.avatar.eyes.y - h / 100 });
   }
 
   async listCameras(): Promise<MediaDeviceInfo[]> {
@@ -292,6 +343,7 @@ export class HeadCam {
     this.recorder?.stop();
     for (const t of this.stream?.getTracks() ?? []) t.stop();
     this.landmarker?.close();
+    this.eraser.dispose();
     if (this.avatar) VRMUtils.deepDispose(this.avatar.vrm.scene);
     this.renderer.dispose();
   }
@@ -308,6 +360,7 @@ export class HeadCam {
     if (this.video.readyState >= 2 && this.video.currentTime !== this.lastVideoTime && this.landmarker) {
       this.lastVideoTime = this.video.currentTime;
       this.onResult(this.landmarker.detectForVideo(this.video, now), now);
+      if (this.settings.mode === "half") this.eraser.update(this.video, now);
     }
 
     this.follow(dt);
@@ -366,18 +419,28 @@ export class HeadCam {
     return { eyes: ea.clone().add(eb).multiplyScalar(0.5), ipd: ea.distanceTo(eb) };
   }
 
-  /** put the avatar head so its eyes land on yours, at the chosen size */
+  private you(): Calibration {
+    return this.calibration ?? { eyes: new THREE.Vector3(0, 3, 4), ipd: 6.3 };
+  }
+
+  /** cm per model metre: VRM is roughly life-size; anime eye bones sit much closer together
+   *  than real eyes, so scale by your face (eye distance vs an average 6.3 cm), not by eye match */
+  private avatarScale(): number {
+    return 100 * (this.you().ipd / AVERAGE_IPD_CM) * this.settings.size;
+  }
+
+  /** where your eyes are (plus the nudge), in the face's own space (cm) */
+  private eyeTarget(): THREE.Vector3 {
+    return this.you().eyes.clone().add(new THREE.Vector3(0, this.settings.offsetY, this.settings.offsetZ));
+  }
+
+  /** head mode: put the avatar head so its eyes land on yours, at the chosen size */
   private place() {
     if (!this.avatar) return;
-    const you = this.calibration ?? { eyes: new THREE.Vector3(0, 3, 4), ipd: 6.3 };
-    // VRM is in metres and roughly life-size; anime eye bones sit much closer together than
-    // real eyes, so scale by your face (eye distance vs an average 6.3 cm), not by eye match
-    const s = 100 * (you.ipd / AVERAGE_IPD_CM) * this.settings.size;
+    const s = this.avatarScale();
     this.inner.scale.setScalar(s);
-    this.inner.position
-      .copy(you.eyes)
-      .add(new THREE.Vector3(0, this.settings.offsetY, this.settings.offsetZ))
-      .sub(this.avatar.eyes.clone().multiplyScalar(s));
+    this.body.scale.setScalar(s);
+    this.inner.position.copy(this.eyeTarget()).sub(this.avatar.eyes.clone().multiplyScalar(s));
     this.avatar.vrm.springBoneManager?.reset();
   }
 
@@ -385,6 +448,7 @@ export class HeadCam {
     const seen = performance.now() - this.lastSeen < LOST_AFTER_MS;
     if (!this.avatar || this.lastSeen === 0) {
       this.anchor.visible = false;
+      this.body.visible = false;
       return;
     }
     // frame-rate independent smoothing; snap on the very first pose
@@ -397,7 +461,9 @@ export class HeadCam {
       this.anchor.updateMatrixWorld(true);
       this.avatar.vrm.springBoneManager?.reset();
     }
-    this.anchor.visible = true;
+    this.anchor.visible = this.settings.mode === "head";
+    this.body.visible = this.settings.mode === "half";
+    if (this.settings.mode === "half") this.followBody();
 
     const em = this.avatar.vrm.expressionManager;
     if (em) {
@@ -413,6 +479,37 @@ export class HeadCam {
       look.yaw += (this.expression.yaw - look.yaw) * 0.4;
       look.pitch += (this.expression.pitch - look.pitch) * 0.4;
     }
+  }
+
+  /**
+   * Half mode: the body stays upright and turns a little with your head; neck and head take
+   * the rest of the rotation. Then the whole avatar is moved so its eyes sit on yours.
+   */
+  private followBody() {
+    const { vrm } = this.avatar!;
+    const q = this.anchor.quaternion;
+    const e = new THREE.Euler().setFromQuaternion(q, "YXZ");
+    const bodyQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, e.y * 0.35, e.z * 0.2, "YXZ"));
+    const rel = toRig(vrm, bodyQ.clone().invert().multiply(q));
+    const neck = vrm.humanoid.getNormalizedBoneNode("neck");
+    const head = vrm.humanoid.getNormalizedBoneNode("head");
+    if (neck && head) {
+      const nq = new THREE.Quaternion().slerp(rel, 0.4);
+      neck.quaternion.copy(nq);
+      head.quaternion.copy(nq.invert().multiply(rel));
+    } else if (head) head.quaternion.copy(rel);
+    breathe(vrm, performance.now() / 1000);
+
+    vrm.humanoid.update();
+    this.body.quaternion.copy(bodyQ);
+    this.body.position.set(0, 0, 0);
+    this.body.updateMatrixWorld(true);
+    const eyesLocal = this.body.worldToLocal(eyeMidWorld(vrm, this.avatar!.eyes, this.body));
+
+    this.anchor.updateMatrix();
+    const target = this.eyeTarget().applyMatrix4(this.anchor.matrix);
+    const s = this.avatarScale();
+    this.body.position.copy(target).sub(eyesLocal.multiplyScalar(s).applyQuaternion(bodyQ));
   }
 
   // ---------- drawing
@@ -457,6 +554,7 @@ export class HeadCam {
 
     const lost = now - this.lastSeen > LOST_AFTER_MS;
     const hide = this.settings.privacyBlur && (lost || !this.calibration || !this.avatar);
+    const half = this.settings.mode === "half";
 
     ctx.save();
     if (this.settings.mirror) {
@@ -470,9 +568,10 @@ export class HeadCam {
       if (hide) ctx.filter = `blur(${Math.round(H / 18)}px)`;
       ctx.drawImage(this.video, sx, 0, sw, vh, 0, 0, W, H);
       ctx.filter = "none";
+      if (half && !hide) this.eraser.draw(ctx, sx, sw, vh, W, H);
     }
     const g = this.outScale;
-    if (this.anchor.visible) ctx.drawImage(this.renderer.domElement, sx * g, 0, sw * g, vh * g, 0, 0, W, H);
+    if (this.anchor.visible || this.body.visible) ctx.drawImage(this.renderer.domElement, sx * g, 0, sw * g, vh * g, 0, 0, W, H);
     ctx.restore();
   }
 
@@ -486,6 +585,7 @@ export class HeadCam {
       fps: Math.round(this.fps),
       model: this.avatar?.name ?? null,
       license: this.avatar?.license ?? null,
+      cleanPlate: this.eraser.clean,
     });
   }
 }
@@ -502,6 +602,40 @@ function measureEyes(vrm: VRM, head: THREE.Object3D): { eyes: THREE.Vector3; ipd
   }
   const h = head.getWorldPosition(new THREE.Vector3());
   return { eyes: h.add(new THREE.Vector3(0, 0.06, 0.05)), ipd: 0.065 };
+}
+
+/** relaxed arms by your sides instead of the T-pose (normalized rig: avatar faces +Z, left arm on +X) */
+function poseArmsDown(vrm: VRM) {
+  const h = vrm.humanoid;
+  const f = isVrm0(vrm) ? -1 : 1;
+  h.getNormalizedBoneNode("leftUpperArm")?.rotation.set(0, 0, -1.2 * f);
+  h.getNormalizedBoneNode("rightUpperArm")?.rotation.set(0, 0, 1.2 * f);
+  h.getNormalizedBoneNode("leftLowerArm")?.rotation.set(0, -0.25 * f, 0);
+  h.getNormalizedBoneNode("rightLowerArm")?.rotation.set(0, 0.25 * f, 0);
+}
+
+const isVrm0 = (vrm: VRM) => vrm.meta.metaVersion === "0";
+
+/**
+ * A rotation in our (camera / avatar-faces-+Z) frame, expressed in the normalized rig's frame.
+ * VRM 0.x rigs face -Z and rotateVRM0 turned the scene 180° around Y, so X and Z rotations flip.
+ */
+function toRig(vrm: VRM, q: THREE.Quaternion): THREE.Quaternion {
+  return isVrm0(vrm) ? new THREE.Quaternion(-q.x, q.y, -q.z, q.w) : q;
+}
+
+/** a slow breath so the body never looks frozen */
+function breathe(vrm: VRM, t: number) {
+  const chest = vrm.humanoid.getNormalizedBoneNode("upperChest") ?? vrm.humanoid.getNormalizedBoneNode("chest");
+  chest?.rotation.set(Math.sin(t * 1.6) * 0.012 * (isVrm0(vrm) ? -1 : 1), 0, 0);
+}
+
+/** the avatar's current eye midpoint in world space (falls back to the head bone plus the rest offset) */
+function eyeMidWorld(vrm: VRM, restEyes: THREE.Vector3, body: THREE.Object3D): THREE.Vector3 {
+  const l = vrm.humanoid.getRawBoneNode("leftEye");
+  const r = vrm.humanoid.getRawBoneNode("rightEye");
+  if (l && r) return l.getWorldPosition(new THREE.Vector3()).add(r.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+  return body.localToWorld(restEyes.clone());
 }
 
 function readLicense(vrm: VRM): ModelLicense {

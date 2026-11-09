@@ -1,9 +1,9 @@
-import { Camera, Circle, Download, RefreshCw, Square, Upload } from "lucide-react";
+import { Camera, Circle, Download, Image as ImageIcon, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SETTINGS, HAIR_UNCUT, HeadCam, type HeadCamSettings, type HeadCamStatus } from "@/features/headcam/HeadCam";
 import { SITE } from "@/config/site";
+import { MODELS } from "@/config/models";
 
-const SAMPLE_MODEL = `${import.meta.env.BASE_URL}models/sample.vrm`;
 
 type Take = { url: string; name: string };
 
@@ -13,7 +13,7 @@ export function App() {
   const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<HeadCamStatus>({ face: false, calibrated: false, fps: 0, model: null, license: null });
+  const [status, setStatus] = useState<HeadCamStatus>({ face: false, calibrated: false, fps: 0, model: null, license: null, cleanPlate: false });
   const [settings, setSettings] = useState<HeadCamSettings>(DEFAULT_SETTINGS);
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [mic, setMic] = useState(false);
@@ -21,6 +21,8 @@ export function App() {
   const [recStart, setRecStart] = useState(0);
   const [now, setNow] = useState(0);
   const [take, setTake] = useState<Take | null>(null);
+  const [modelId, setModelId] = useState(MODELS[0].id);
+  const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -58,12 +60,33 @@ export function App() {
       await cam.start(deviceId);
       setStarted(true);
       setCameras(await cam.listCameras());
-      if (!status.model) await cam.loadVrm(SAMPLE_MODEL);
+      if (!status.model) await cam.loadVrm(MODELS.find((m) => m.id === modelId)!.file);
     });
 
   const loadFile = (file: File | undefined) => {
     if (!file) return;
-    run("กำลังโหลดหัว…", () => camRef.current!.loadVrm(file));
+    setModelId("");
+    run("กำลังโหลดตัวละคร…", () => camRef.current!.loadVrm(file));
+  };
+
+  const pickModel = (id: string) => {
+    setModelId(id);
+    const m = MODELS.find((x) => x.id === id);
+    if (m && started) run("กำลังโหลดตัวละคร…", () => camRef.current!.loadVrm(m.file));
+  };
+
+  /** 3-2-1, then grab the empty room — gives you time to step out of frame */
+  const capturePlate = () => {
+    let n = 3;
+    setCountdown(n);
+    const id = setInterval(() => {
+      n -= 1;
+      setCountdown(n);
+      if (n === 0) {
+        clearInterval(id);
+        camRef.current?.capturePlate();
+      }
+    }, 1000);
   };
 
   const set = <K extends keyof HeadCamSettings>(key: K, value: HeadCamSettings[K]) => {
@@ -96,7 +119,7 @@ export function App() {
   const hint = !started
     ? null
     : !status.model
-      ? "เลือกไฟล์หัว (.vrm)"
+      ? "เลือกตัวละคร"
       : !status.face
         ? "ไม่เจอหน้า — ขยับเข้ามาในกรอบ ภาพจะเบลอไว้ก่อน"
         : !status.calibrated
@@ -129,13 +152,39 @@ export function App() {
             </div>
           )}
           {busy && <div className="hint">{busy}</div>}
+          {countdown > 0 && <div className="countdown">{countdown}<span>ออกไปจากกล้องก่อน</span></div>}
         </section>
 
         <aside className="panel">
           {error && <p className="error">{error}</p>}
 
           <fieldset>
-            <legend>หัว</legend>
+            <legend>โหมด</legend>
+            <div className="row">
+              <Toggle label="แค่หัว" on={settings.mode === "head"} onClick={() => set("mode", "head")} />
+              <Toggle label="ครึ่งตัว" on={settings.mode === "half"} onClick={() => set("mode", "half")} />
+            </div>
+            {settings.mode === "half" && (
+              <>
+                <button disabled={!started || countdown > 0} onClick={capturePlate}>
+                  <ImageIcon size={16} /> ถ่ายฉากหลัง (นับ 3 วิ)
+                </button>
+                <p className="note">
+                  {status.cleanPlate
+                    ? "มีภาพฉากหลังแล้ว — ตัวจริงถูกลบด้วยภาพห้องเปล่า"
+                    : "ยังไม่มีภาพห้องเปล่า ระบบจะค่อยๆ เรียนรู้ฉากเอง แต่ถ่ายไว้จะเนียนกว่า"}
+                </p>
+              </>
+            )}
+          </fieldset>
+
+          <fieldset>
+            <legend>ตัวละคร</legend>
+            <div className="models">
+              {MODELS.map((m) => (
+                <Toggle key={m.id} label={m.label} on={modelId === m.id} onClick={() => pickModel(m.id)} />
+              ))}
+            </div>
             <p className="model">{status.model ?? "ยังไม่ได้โหลด"}</p>
             {status.license && (
               <p className={`license ${status.license.commercial ? "ok" : "no"}`}>
@@ -150,12 +199,9 @@ export function App() {
             )}
             <div className="row">
               <label className="button">
-                <Upload size={16} /> เลือกไฟล์ .vrm
+                <Upload size={16} /> เลือกไฟล์ .vrm ของเราเอง
                 <input type="file" accept=".vrm,.glb" hidden onChange={(e) => loadFile(e.target.files?.[0])} />
               </label>
-              <button disabled={!started} onClick={() => run("กำลังโหลดหัว…", () => camRef.current!.loadVrm(SAMPLE_MODEL))}>
-                ตัวอย่าง
-              </button>
             </div>
             <p className="note">ทำหัวเองฟรีด้วย VRoid Studio แล้ว export เป็น .vrm</p>
           </fieldset>
@@ -165,7 +211,7 @@ export function App() {
             <Slider label="ขนาดหัว" min={0.6} max={2} step={0.05} value={settings.size} onChange={(v) => set("size", v)} fmt={(v) => `${v.toFixed(2)}×`} />
             <Slider label="ขึ้น / ลง" min={-8} max={8} step={0.25} value={settings.offsetY} onChange={(v) => set("offsetY", v)} fmt={(v) => `${v} cm`} />
             <Slider label="หน้า / หลัง" min={-10} max={6} step={0.25} value={settings.offsetZ} onChange={(v) => set("offsetZ", v)} fmt={(v) => `${v} cm`} />
-            <Slider label="ความยาวผม" min={6} max={HAIR_UNCUT} step={1} value={settings.hair} onChange={(v) => set("hair", v)} fmt={(v) => (v >= HAIR_UNCUT ? "ไม่ตัด" : `${v} cm ใต้ตา`)} />
+            <Slider disabled={settings.mode === "half"} label="ความยาวผม" min={6} max={HAIR_UNCUT} step={1} value={settings.hair} onChange={(v) => set("hair", v)} fmt={(v) => (v >= HAIR_UNCUT ? "ไม่ตัด" : `${v} cm ใต้ตา`)} />
             <Slider label="ความนุ่ม" min={0} max={0.9} step={0.05} value={settings.smoothing} onChange={(v) => set("smoothing", v)} fmt={(v) => v.toFixed(2)} />
             <button disabled={!status.face} onClick={() => camRef.current?.recalibrate()}>
               <RefreshCw size={16} /> วัดหน้าใหม่
@@ -232,13 +278,13 @@ export function App() {
   );
 }
 
-function Slider(p: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; fmt: (v: number) => string }) {
+function Slider(p: { disabled?: boolean; label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; fmt: (v: number) => string }) {
   return (
-    <label className="slider">
+    <label className={`slider ${p.disabled ? "off" : ""}`}>
       <span>
         {p.label} <b>{p.fmt(p.value)}</b>
       </span>
-      <input type="range" min={p.min} max={p.max} step={p.step} value={p.value} onChange={(e) => p.onChange(Number(e.target.value))} />
+      <input type="range" disabled={p.disabled} min={p.min} max={p.max} step={p.step} value={p.value} onChange={(e) => p.onChange(Number(e.target.value))} />
     </label>
   );
 }

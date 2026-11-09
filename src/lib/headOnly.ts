@@ -1,24 +1,32 @@
 import * as THREE from "three";
 
-/** one skinned mesh trimmed down to the triangles that move with the head */
-export interface HeadPart {
+/** one skinned mesh, with what we need to show only part of it */
+export interface AvatarPart {
   mesh: THREE.SkinnedMesh;
-  /** kept triangles, 3 vertex indices each, grouped by material */
-  groups: { tris: number[]; minY: number[]; materialIndex?: number }[];
+  /** original triangles (3 vertex indices each), grouped by material */
+  groups: { tris: number[]; head: Uint8Array; minY: Float32Array; materialIndex?: number }[];
+}
+
+export interface RigidPart {
+  mesh: THREE.Mesh;
+  head: boolean;
+}
+
+export interface AvatarParts {
+  skinned: AvatarPart[];
+  rigid: RigidPart[];
 }
 
 /**
- * Keeps only the part of a skinned avatar that moves with the head:
- * a triangle survives when all three of its vertices are mostly weighted
- * to the head bone or anything below it (eyes, jaw, hair springs…).
- * Works for any VRM — no mesh names assumed.
+ * Indexes every triangle of a skinned avatar so parts of it can be shown later:
+ * - `head`: all three vertices are mostly weighted to the head bone or anything below it
+ *   (eyes, jaw, hair springs…). Works for any VRM — no mesh names assumed.
+ * - `minY`: the triangle's lowest rest height, to cut long hair or show only the upper body.
  *
- * Call with the avatar at rest and its root at the origin: each triangle also remembers
- * its lowest rest height, so long hair can be cut later with {@link cutBelow}.
- *
+ * Call with the avatar at rest and its root at the origin.
  * @param keepAt how much head weight a vertex needs to count as "head" (0..1)
  */
-export function keepHeadOnly(root: THREE.Object3D, head: THREE.Object3D, keepAt = 0.5): HeadPart[] {
+export function indexAvatar(root: THREE.Object3D, head: THREE.Object3D, keepAt = 0.5): AvatarParts {
   const headBones = new Set<THREE.Object3D>();
   head.traverse((o) => headBones.add(o));
   const insideHead = (o: THREE.Object3D) => {
@@ -27,7 +35,7 @@ export function keepHeadOnly(root: THREE.Object3D, head: THREE.Object3D, keepAt 
   };
 
   root.updateMatrixWorld(true);
-  const parts: HeadPart[] = [];
+  const parts: AvatarParts = { skinned: [], rigid: [] };
   const v = new THREE.Vector3();
 
   root.traverse((obj) => {
@@ -35,8 +43,8 @@ export function keepHeadOnly(root: THREE.Object3D, head: THREE.Object3D, keepAt 
     if (!mesh.isMesh) return;
     const skinned = obj as THREE.SkinnedMesh;
     if (!skinned.isSkinnedMesh) {
-      // a rigid mesh (glasses, a hat) is kept when it hangs under the head
-      mesh.visible = insideHead(mesh);
+      // a rigid mesh (glasses, a hat) counts as head when it hangs under the head
+      parts.rigid.push({ mesh, head: insideHead(mesh) });
       return;
     }
 
@@ -48,51 +56,56 @@ export function keepHeadOnly(root: THREE.Object3D, head: THREE.Object3D, keepAt 
 
     const isHeadBone = skinned.skeleton.bones.map((b) => headBones.has(b));
     const vertexCount = skinIndex.count;
-    const keep = new Uint8Array(vertexCount);
+    const isHead = new Uint8Array(vertexCount);
     const restY = new Float32Array(vertexCount);
     for (let i = 0; i < vertexCount; i++) {
       let w = 0;
       for (let k = 0; k < skinIndex.itemSize; k++) {
         if (isHeadBone[skinIndex.getComponent(i, k)]) w += skinWeight.getComponent(i, k);
       }
-      keep[i] = w >= keepAt ? 1 : 0;
+      isHead[i] = w >= keepAt ? 1 : 0;
       restY[i] = v.fromBufferAttribute(position, i).applyMatrix4(skinned.matrixWorld).y;
     }
 
     const index = geo.index ? Array.from(geo.index.array) : [...Array(vertexCount).keys()];
     const groups = geo.groups.length ? geo.groups : [{ start: 0, count: index.length, materialIndex: undefined }];
-    const part: HeadPart = { mesh: skinned, groups: [] };
+    const part: AvatarPart = { mesh: skinned, groups: [] };
     for (const g of groups) {
-      const tris: number[] = [];
-      const minY: number[] = [];
-      for (let i = g.start; i < g.start + g.count; i += 3) {
-        const a = index[i], b = index[i + 1], c = index[i + 2];
-        if (keep[a] && keep[b] && keep[c]) {
-          tris.push(a, b, c);
-          minY.push(Math.min(restY[a], restY[b], restY[c]));
-        }
+      const tris = index.slice(g.start, g.start + g.count);
+      const n = tris.length / 3;
+      const head = new Uint8Array(n);
+      const minY = new Float32Array(n);
+      for (let t = 0; t < n; t++) {
+        const a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
+        head[t] = isHead[a] & isHead[b] & isHead[c];
+        minY[t] = Math.min(restY[a], restY[b], restY[c]);
       }
-      part.groups.push({ tris, minY, materialIndex: g.materialIndex });
+      part.groups.push({ tris, head, minY, materialIndex: g.materialIndex });
     }
-    // the bounds still describe the whole body; skinned meshes are drawn regardless
+    // the bounds describe the rest pose; skinned meshes are drawn regardless
     skinned.frustumCulled = false;
-    parts.push(part);
+    parts.skinned.push(part);
   });
 
-  cutBelow(parts, -Infinity);
   return parts;
 }
 
-/** hide every head triangle that dips below `y` (rest height, model units) — trims long hair */
-export function cutBelow(parts: HeadPart[], y: number): void {
-  for (const { mesh, groups } of parts) {
+/**
+ * Shows only the triangles that pass: `headOnly` keeps the head (and hair),
+ * `minY` hides anything that dips below that rest height (model units).
+ */
+export function showParts(parts: AvatarParts, opts: { headOnly: boolean; minY: number }): void {
+  for (const { mesh, head } of parts.rigid) mesh.visible = !opts.headOnly || head;
+
+  for (const { mesh, groups } of parts.skinned) {
     const geo = mesh.geometry;
     const out: number[] = [];
     const ranges: { start: number; count: number; materialIndex?: number }[] = [];
     for (const g of groups) {
       const start = out.length;
       for (let t = 0; t < g.minY.length; t++) {
-        if (g.minY[t] >= y) out.push(g.tris[t * 3], g.tris[t * 3 + 1], g.tris[t * 3 + 2]);
+        if ((opts.headOnly && !g.head[t]) || g.minY[t] < opts.minY) continue;
+        out.push(g.tris[t * 3], g.tris[t * 3 + 1], g.tris[t * 3 + 2]);
       }
       ranges.push({ start, count: out.length - start, materialIndex: g.materialIndex });
     }
