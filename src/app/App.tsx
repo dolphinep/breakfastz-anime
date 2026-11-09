@@ -1,8 +1,8 @@
-import { Camera, Circle, Download, Image as ImageIcon, RefreshCw, Square, Upload } from "lucide-react";
+import { Camera, Circle, Download, ExternalLink, Image as ImageIcon, RefreshCw, Square, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_SETTINGS, HAIR_UNCUT, HeadCam, type HeadCamSettings, type HeadCamStatus } from "@/features/headcam/HeadCam";
 import { SITE } from "@/config/site";
-import { MODELS } from "@/config/models";
+import { AVATAR_SOURCES, MODELS } from "@/config/models";
 
 
 type Take = { url: string; name: string };
@@ -203,7 +203,20 @@ export function App() {
                 <input type="file" accept=".vrm,.glb" hidden onChange={(e) => loadFile(e.target.files?.[0])} />
               </label>
             </div>
-            <p className="note">ทำหัวเองฟรีด้วย VRoid Studio แล้ว export เป็น .vrm</p>
+            <details className="sources">
+              <summary>หาตัวละครฟรีเพิ่ม</summary>
+              <ul>
+                {AVATAR_SOURCES.map((x) => (
+                  <li key={x.url}>
+                    <a href={x.url} target="_blank" rel="noreferrer">
+                      {x.label} <ExternalLink size={12} />
+                    </a>
+                    <span>{x.note}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="note">เช็กไลเซนส์ทุกตัวก่อนลงช่อง (แอปจะบอกให้เมื่อโหลดไฟล์)</p>
+            </details>
           </fieldset>
 
           <fieldset>

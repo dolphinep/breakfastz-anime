@@ -70,3 +70,8 @@ button.big.stop { background: var(--bad); color: var(--white); }
 .slider.off { opacity: 0.4; }
 .countdown { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; font: 700 120px "Fredoka", sans-serif; color: var(--white); background: rgba(42, 15, 8, 0.45); }
 .countdown span { font: 500 20px "Mitr", sans-serif; }
+.sources summary { cursor: pointer; font-weight: 500; }
+.sources ul { margin: 8px 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.sources li { display: flex; flex-direction: column; font-size: 13px; }
+.sources a { color: var(--ink); font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+.sources span { color: var(--muted); }
