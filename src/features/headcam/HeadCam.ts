@@ -327,8 +327,21 @@ export class HeadCam {
 
   // ---------- recording
 
+  /** true while recording, paused or not */
   get recording(): boolean {
-    return this.recorder?.state === "recording";
+    return this.recorder !== null && this.recorder.state !== "inactive";
+  }
+
+  get paused(): boolean {
+    return this.recorder?.state === "paused";
+  }
+
+  pauseRecording(): void {
+    if (this.recorder?.state === "recording") this.recorder.pause();
+  }
+
+  resumeRecording(): void {
+    if (this.recorder?.state === "paused") this.recorder.resume();
   }
 
   /** record the composited picture (and the mic, if asked) */

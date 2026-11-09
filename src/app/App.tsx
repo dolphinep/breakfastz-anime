@@ -7,6 +7,8 @@ import {
   Image as ImageIcon,
   Mic,
   MicOff,
+  Pause,
+  Play,
   RefreshCw,
   Share2,
   ShieldCheck,
@@ -62,6 +64,10 @@ export function App() {
   const [mic, setMic] = useState(true);
   const [recording, setRecording] = useState(false);
   const [recStart, setRecStart] = useState(0);
+  const [paused, setPaused] = useState(false);
+  /** ms spent paused so far, plus when the current pause began */
+  const [pausedMs, setPausedMs] = useState(0);
+  const [pauseAt, setPauseAt] = useState(0);
   const [now, setNow] = useState(0);
   const [take, setTake] = useState<Take | null>(null);
   const [modelId, setModelId] = useState(MODELS[0].id);
@@ -164,6 +170,7 @@ export function App() {
     if (!cam?.recording) return;
     const blob = await cam.stopRecording();
     setRecording(false);
+    setPaused(false);
     if (blob) {
       const ext = blob.type.includes("mp4") ? "mp4" : "webm";
       showTake({ url: URL.createObjectURL(blob), name: `anime-${stamp()}.${ext}`, kind: "video", blob });
@@ -177,9 +184,26 @@ export function App() {
         await camRef.current!.startRecording(mic);
         setRecStart(performance.now());
         setNow(performance.now());
+        setPausedMs(0);
+        setPaused(false);
         setRecording(true);
       }),
     );
+  };
+
+  const togglePause = () => {
+    const cam = camRef.current;
+    if (!cam?.recording) return;
+    const t = performance.now();
+    if (cam.paused) {
+      cam.resumeRecording();
+      setPausedMs((ms) => ms + (t - pauseAt));
+      setPaused(false);
+    } else {
+      cam.pauseRecording();
+      setPauseAt(t);
+      setPaused(true);
+    }
   };
 
   const photo = async () => {
@@ -193,10 +217,10 @@ export function App() {
     const id = setInterval(() => {
       const t = performance.now();
       setNow(t);
-      if (t - recStart > MAX_RECORD_S * 1000) void stopRecording();
+      if (!paused && t - recStart - pausedMs > MAX_RECORD_S * 1000) void stopRecording();
     }, 250);
     return () => clearInterval(id);
-  }, [recording, recStart, stopRecording]);
+  }, [recording, recStart, pausedMs, paused, stopRecording]);
 
   // keyboard: space = record / stop, P = photo
   useEffect(() => {
@@ -207,7 +231,10 @@ export function App() {
         e.preventDefault();
         if (recording) void stopRecording();
         else if (!countdown) startRecording();
-      } else if (e.key === "p" || e.key === "P") void photo();
+      } else if (e.key === "p" || e.key === "P") {
+        if (recording) togglePause();
+        else void photo();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -224,7 +251,8 @@ export function App() {
   const canShare = (t: Take) =>
     typeof navigator.canShare === "function" && navigator.canShare({ files: [new File([t.blob], t.name, { type: t.blob.type })] });
 
-  const seconds = recording ? Math.max(0, Math.floor((now - recStart) / 1000)) : 0;
+  const elapsed = (paused ? pauseAt : now) - recStart - pausedMs;
+  const seconds = recording ? Math.max(0, Math.floor(elapsed / 1000)) : 0;
   const hint = !started
     ? null
     : !status.model
@@ -261,19 +289,18 @@ export function App() {
                     title={m.license}
                   >
                     <img src={m.thumb} alt="" width={160} height={160} />
-                    <span>{m.name}</span>
+                    <span className="name">{m.name}</span>
                     {loading?.id === m.id && <Spinner pct={loading.pct} />}
                   </button>
                 ))}
               </div>
-              <label className={`avatar upload ${modelId === "file" ? "on" : ""}`} title="ใช้ไฟล์ .vrm ของเราเอง">
-                <Upload size={22} />
-                <span>ไฟล์ของฉัน</span>
-                {loading?.id === "file" && <Spinner pct={loading.pct} />}
-                <input type="file" accept=".vrm,.glb" hidden onChange={(e) => loadFile(e.target.files?.[0])} />
-              </label>
             </div>
             <div className="chars-foot">
+              <label className={`button upload ${modelId === "file" ? "on" : ""}`} title="ใช้ไฟล์ .vrm ของเราเอง">
+                {loading?.id === "file" ? <span className="mini-spin" aria-label={`กำลังโหลด ${loading.pct}%`} /> : <Upload size={16} />}
+                {loading?.id === "file" ? `${loading.pct}%` : "ไฟล์ของฉัน (.vrm)"}
+                <input type="file" accept=".vrm,.glb" hidden onChange={(e) => loadFile(e.target.files?.[0])} />
+              </label>
               <details className="sources">
                 <summary>
                   หาตัวละครฟรีเพิ่ม <ChevronDown size={14} />
@@ -308,8 +335,10 @@ export function App() {
             {!started && <Intro busy={!!busy} onStart={() => start()} />}
             {hint && !countdown && !busy && <div className="hint">{hint}</div>}
             {recording && (
-              <div className="rec">
-                <Circle size={12} fill="currentColor" /> {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+              <div className={`rec ${paused ? "paused" : ""}`}>
+                {paused ? <Pause size={12} fill="currentColor" /> : <Circle size={12} fill="currentColor" />}{" "}
+                {paused ? "พัก " : ""}
+                {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
               </div>
             )}
             {busy && started && <div className="hint">{busy}</div>}
@@ -328,10 +357,17 @@ export function App() {
           )}
 
           <div className="shoot">
-            <button className="round" disabled={!started || recording} onClick={photo} title="ถ่ายรูป (P)">
-              <ImageIcon size={22} />
-              <span>ถ่ายรูป</span>
-            </button>
+            {recording ? (
+              <button className={`round ${paused ? "go-soft" : ""}`} onClick={togglePause} title="พัก / อัดต่อ (P)">
+                {paused ? <Play size={22} fill="currentColor" /> : <Pause size={22} fill="currentColor" />}
+                <span>{paused ? "อัดต่อ" : "พัก"}</span>
+              </button>
+            ) : (
+              <button className="round" disabled={!started} onClick={photo} title="ถ่ายรูป (P)">
+                <ImageIcon size={22} />
+                <span>ถ่ายรูป</span>
+              </button>
+            )}
             <button
               className={`round big ${recording ? "stop" : "go"}`}
               disabled={!started || !!countdown}
@@ -350,7 +386,7 @@ export function App() {
               <Toggle label="9:16" on={settings.aspect === "9:16"} onClick={() => set("aspect", "9:16")} />
             </div>
           </div>
-          {!phone && <p className="keys">คีย์ลัด: Space = อัด / หยุด · P = ถ่ายรูป</p>}
+          {!phone && <p className="keys">คีย์ลัด: Space = อัด / หยุด · P = ถ่ายรูป (ตอนอัด = พัก / อัดต่อ)</p>}
         </div>
 
         <aside className="panel">
