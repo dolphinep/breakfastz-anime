@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+.wrangler
+.dev.vars
+.env*
+scratch/
+test-results/
+tests/.results/
+playwright-report/
+public/mediapipe/
