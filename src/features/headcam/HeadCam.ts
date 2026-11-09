@@ -65,7 +65,7 @@ export interface HeadCamSettings {
 export const HAIR_UNCUT = 40;
 
 export const DEFAULT_SETTINGS: HeadCamSettings = {
-  mode: "head",
+  mode: "half",
   size: 1.15,
   offsetY: 0,
   offsetZ: -4,
@@ -234,8 +234,11 @@ export class HeadCam {
     this.emitStatus(true);
   }
 
-  /** load a .vrm from a URL or a file the user picked */
+  private loadSeq = 0;
+
+  /** load a .vrm from a URL or a file the user picked; a newer call wins if they overlap */
   async loadVrm(source: string | File, onProgress?: (fraction: number) => void): Promise<void> {
+    const seq = ++this.loadSeq;
     const url = typeof source === "string" ? source : URL.createObjectURL(source);
     const name = typeof source === "string" ? (source.split("/").pop() ?? source) : source.name;
     try {
@@ -260,6 +263,10 @@ export class HeadCam {
       vrm.scene.updateMatrixWorld(true);
       const { eyes, ipd } = measureEyes(vrm, head);
 
+      if (seq !== this.loadSeq) {
+        VRMUtils.deepDispose(vrm.scene); // the user already picked another character
+        return;
+      }
       if (this.avatar) {
         this.avatar.vrm.scene.removeFromParent();
         VRMUtils.deepDispose(this.avatar.vrm.scene);

@@ -45,13 +45,14 @@ Bundled in `public/avatars/` (textures shrunk to ≤1024 px with `scripts/slim-m
 
 | file | name in app | license |
 |---|---|---|
+| `ren.vrm` | Ren | VRoid Studio sample "AvatarSample_C" by pixiv: free for commercial and non-commercial use, no credit required, may be redistributed free of charge (not CC0; selling the file is prohibited) |
 | `fumiriya.vrm` | Fumiriya | CC0: VRoid Studio sample "Sakurada Fumiriya" by pixiv |
 | `hairmale.vrm` | Kuro | CC0: VRoid Studio sample "HairSample_Male" by pixiv |
-| `pixiv.vrm` | Mira | VRM Public License 1.0: `VRM1_Constraint_Twist_Sample` by pixiv Inc. ([three-vrm](https://github.com/pixiv/three-vrm)); commercial use and redistribution allowed, no credit required |
+| `pixiv.vrm` | Mira (default, preloaded with the page) | VRM Public License 1.0: `VRM1_Constraint_Twist_Sample` by pixiv Inc. ([three-vrm](https://github.com/pixiv/three-vrm)); commercial use and redistribution allowed, no credit required |
 | `shibu.vrm` | Shibu | CC0: VRoid Studio sample "Darkness Shibu" by pixiv |
 | `shino.vrm` | Shino | CC0: VRoid Studio sample "Sendagaya Shino" by pixiv |
 
-The CC0 files came from [madjin/vrm-samples](https://github.com/madjin/vrm-samples); the license is also stored in each file's VRM meta.
+The CC0 files and AvatarSample_C came from [madjin/vrm-samples](https://github.com/madjin/vrm-samples); the license is also stored in each file's VRM meta.
 
 Make your own for free in [VRoid Studio](https://vroid.com/en/studio), or find more on [VRoid Hub](https://hub.vroid.com/), [Open Source Avatars](https://www.opensourceavatars.com/) and Booth. Always read a model's license before using it.
 

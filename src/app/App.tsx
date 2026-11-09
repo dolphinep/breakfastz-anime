@@ -66,6 +66,8 @@ export function App() {
   const [take, setTake] = useState<Take | null>(null);
   const [modelId, setModelId] = useState(MODELS[0].id);
   const [countdown, setCountdown] = useState<{ n: number; text: string } | null>(null);
+  /** which character is downloading right now (id, or "file" for the user's own) and how far */
+  const [loading, setLoading] = useState<{ id: string; pct: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -74,6 +76,8 @@ export function App() {
     cam.settings = { ...INITIAL };
     cam.onStatus = setStatus;
     camRef.current = cam;
+    // the default character loads with the page (it's also <link rel="preload">ed), before the camera
+    void loadModel(MODELS[0].id, MODELS[0].file);
     return () => {
       cam.dispose();
       camRef.current = null;
@@ -92,30 +96,40 @@ export function App() {
     }
   }, []);
 
-  const progress = (f: number) => setBusy(`กำลังโหลดตัวละคร ${Math.round(f * 100)}%`);
-
   const start = (deviceId?: string) =>
     run("กำลังเปิดกล้อง…", async () => {
       const cam = camRef.current!;
       await cam.start(deviceId);
       setStarted(true);
       setCameras(await cam.listCameras());
-      if (!status.model && modelId) {
-        setBusy("กำลังโหลดตัวละคร…");
-        await cam.loadVrm(MODELS.find((m) => m.id === modelId)!.file, progress);
-      }
     });
 
+  /** download + show a character; a spinner with % sits on its card meanwhile */
+  async function loadModel(id: string, source: string | File) {
+    const cam = camRef.current;
+    if (!cam) return;
+    setLoading({ id, pct: 0 });
+    setError(null);
+    try {
+      await cam.loadVrm(source, (f) => setLoading((l) => (l?.id === id ? { id, pct: Math.round(f * 100) } : l)));
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setLoading((l) => (l?.id === id ? null : l));
+    }
+  }
+
   const pickModel = (id: string) => {
-    setModelId(id);
     const m = MODELS.find((x) => x.id === id);
-    if (m && started) void run("กำลังโหลดตัวละคร…", () => camRef.current!.loadVrm(m.file, progress));
+    if (!m || id === modelId) return;
+    setModelId(id);
+    void loadModel(id, m.file);
   };
 
   const loadFile = (file: File | undefined) => {
     if (!file) return;
-    setModelId("");
-    void run("กำลังโหลดตัวละคร…", () => camRef.current!.loadVrm(file, progress));
+    setModelId("file");
+    void loadModel("file", file);
   };
 
   const set = <K extends keyof HeadCamSettings>(key: K, value: HeadCamSettings[K]) => {
@@ -214,7 +228,9 @@ export function App() {
   const hint = !started
     ? null
     : !status.model
-      ? "เลือกตัวละคร"
+      ? loading
+        ? `กำลังโหลดตัวละคร ${loading.pct}%`
+        : "เลือกตัวละคร"
       : !status.face
         ? "ไม่เจอหน้า ขยับเข้ามาในกรอบ (ภาพจะเบลอไว้ก่อน)"
         : !status.calibrated
@@ -232,6 +248,61 @@ export function App() {
 
       <main className="layout">
         <div className="main-col">
+          <section className="chars" aria-label="ตัวละคร">
+            <div className="carousel-row">
+              <div className="carousel" role="list">
+                {MODELS.map((m) => (
+                  <button
+                    key={m.id}
+                    role="listitem"
+                    className={`avatar ${modelId === m.id ? "on" : ""}`}
+                    aria-pressed={modelId === m.id}
+                    onClick={() => pickModel(m.id)}
+                    title={m.license}
+                  >
+                    <img src={m.thumb} alt="" width={160} height={160} />
+                    <span>{m.name}</span>
+                    {loading?.id === m.id && <Spinner pct={loading.pct} />}
+                  </button>
+                ))}
+              </div>
+              <label className={`avatar upload ${modelId === "file" ? "on" : ""}`} title="ใช้ไฟล์ .vrm ของเราเอง">
+                <Upload size={22} />
+                <span>ไฟล์ของฉัน</span>
+                {loading?.id === "file" && <Spinner pct={loading.pct} />}
+                <input type="file" accept=".vrm,.glb" hidden onChange={(e) => loadFile(e.target.files?.[0])} />
+              </label>
+            </div>
+            <div className="chars-foot">
+              <details className="sources">
+                <summary>
+                  หาตัวละครฟรีเพิ่ม <ChevronDown size={14} />
+                </summary>
+                <ul>
+                  {AVATAR_SOURCES.map((x) => (
+                    <li key={x.url}>
+                      <a href={x.url} target="_blank" rel="noreferrer">
+                        {x.label} <ExternalLink size={12} />
+                      </a>
+                      <span>{x.note}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="note">ได้ไฟล์ .vrm มาแล้วกด "ไฟล์ของฉัน" · ตัวละครลิขสิทธิ์ (เช่นตัวการ์ตูนดัง) เล่นเองได้ แต่อย่าเอาไปหาเงิน</p>
+              </details>
+              {status.license && (
+                <p className={`license ${status.license.commercial ? "ok" : "no"}`}>
+                  {status.license.commercial === null
+                    ? "ไฟล์ไม่ได้บอกว่าใช้เชิงพาณิชย์ได้ไหม ถ้าจะลงช่องที่มีรายได้ เช็กกับคนทำก่อน"
+                    : status.license.commercial
+                      ? "ตัวนี้ใช้ลงช่องที่มีรายได้ได้"
+                      : "ตัวนี้ห้ามใช้หาเงิน ใช้เล่นส่วนตัวได้"}
+                  {status.license.credit && " · ต้องให้เครดิตคนทำ"}
+                </p>
+              )}
+            </div>
+          </section>
+
           <section className={`stage ${settings.aspect === "9:16" ? "tall" : ""}`}>
             <canvas ref={canvasRef} className="screen" />
             {!started && <Intro busy={!!busy} onStart={() => start()} />}
@@ -283,54 +354,6 @@ export function App() {
         </div>
 
         <aside className="panel">
-          <fieldset>
-            <legend>ตัวละคร</legend>
-            <div className="gallery">
-              {MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  className={`avatar ${modelId === m.id ? "on" : ""}`}
-                  aria-pressed={modelId === m.id}
-                  onClick={() => pickModel(m.id)}
-                  title={m.license}
-                >
-                  <img src={m.thumb} alt="" width={160} height={160} loading="lazy" />
-                  <span>{m.name}</span>
-                </button>
-              ))}
-              <label className={`avatar upload ${modelId === "" ? "on" : ""} ${started ? "" : "off"}`}>
-                <Upload size={22} />
-                <span>ไฟล์ของฉัน</span>
-                <input type="file" accept=".vrm,.glb" hidden disabled={!started} onChange={(e) => loadFile(e.target.files?.[0])} />
-              </label>
-            </div>
-            {status.license && (
-              <p className={`license ${status.license.commercial ? "ok" : "no"}`}>
-                {status.license.commercial === null
-                  ? "ไฟล์ไม่ได้บอกว่าใช้เชิงพาณิชย์ได้ไหม ถ้าจะลงช่องที่มีรายได้ เช็กกับคนทำก่อน"
-                  : status.license.commercial
-                    ? "ตัวนี้ใช้ลงช่องที่มีรายได้ได้"
-                    : "ตัวนี้ห้ามใช้หาเงิน ใช้เล่นส่วนตัวได้"}
-                {status.license.credit && " · ต้องให้เครดิตคนทำ"}
-              </p>
-            )}
-            <details className="sources">
-              <summary>
-                หาตัวละครฟรีเพิ่ม <ChevronDown size={14} />
-              </summary>
-              <ul>
-                {AVATAR_SOURCES.map((x) => (
-                  <li key={x.url}>
-                    <a href={x.url} target="_blank" rel="noreferrer">
-                      {x.label} <ExternalLink size={12} />
-                    </a>
-                    <span>{x.note}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="note">ได้ไฟล์ .vrm มาแล้วกด "ไฟล์ของฉัน" · ตัวละครลิขสิทธิ์ (เช่นตัวการ์ตูนดัง) เล่นเองได้ แต่อย่าเอาไปหาเงิน</p>
-            </details>
-          </fieldset>
 
           <fieldset>
             <legend>โหมด</legend>
@@ -482,6 +505,15 @@ export function App() {
         </a>
       </footer>
     </div>
+  );
+}
+
+function Spinner({ pct }: { pct: number }) {
+  return (
+    <span className="spinner" role="status" aria-label={`กำลังโหลด ${pct}%`}>
+      <span className="ring" />
+      <b>{pct}%</b>
+    </span>
   );
 }
 

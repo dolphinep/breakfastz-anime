@@ -74,12 +74,23 @@ button.big { background: var(--yolk); font-size: 20px; padding: 12px 28px; }
 .button.primary { background: var(--yolk); }
 .toggle.on { background: var(--yolk); }
 
-.gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.avatar { min-width: 0; flex-direction: column; gap: 4px; padding: 4px 4px 6px; border-radius: 14px; font-size: 13px; min-height: 0; }
+/* ---------- character carousel (above the camera) */
+.chars { display: flex; flex-direction: column; gap: 8px; }
+.carousel-row { display: flex; gap: 10px; align-items: stretch; }
+.carousel { flex: 1; min-width: 0; display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x proximity; padding: 4px 6px 10px 2px; scrollbar-width: thin; }
+.avatar { position: relative; flex: 0 0 auto; width: 96px; min-width: 0; flex-direction: column; gap: 4px; padding: 4px 4px 6px; border-radius: 14px; font-size: 13px; min-height: 0; scroll-snap-align: start; }
 .avatar img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; display: block; background: var(--toast); }
 .avatar.on { background: var(--yolk); }
-.avatar.upload { display: flex; align-items: center; justify-content: center; background: var(--white); border: var(--line); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; color: var(--muted); }
-.avatar.upload.off { opacity: 0.45; cursor: not-allowed; }
+.avatar.upload { display: flex; align-items: center; justify-content: center; align-self: flex-start; height: calc(96px + 22px); margin-top: 4px; background: var(--white); border: var(--line); box-shadow: 3px 3px 0 var(--ink); cursor: pointer; color: var(--muted); }
+.avatar.upload.on { background: var(--yolk); color: var(--ink); }
+.spinner { position: absolute; inset: 4px 4px auto 4px; aspect-ratio: 1; display: grid; place-items: center; background: rgba(255, 253, 245, 0.7); border-radius: 10px; }
+.spinner .ring { position: absolute; width: 48%; aspect-ratio: 1; border-radius: 50%; border: 5px solid rgba(42, 15, 8, 0.15); border-top-color: var(--bacon); animation: spin 0.8s linear infinite; }
+.spinner b { font: 600 12px "JetBrains Mono", monospace; }
+.avatar.upload .spinner { inset: 4px; aspect-ratio: auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.chars-foot { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.chars-foot .sources { flex: 1 1 260px; }
+.chars-foot .license { flex: 0 1 auto; }
 
 .bgs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .bg { font-size: 13px; padding: 6px; }
@@ -128,11 +139,14 @@ details[open] > summary svg { transform: rotate(180deg); }
 .foot a { color: var(--ink); }
 
 @media (max-width: 600px) {
+  .avatar { width: 80px; }
+  .avatar.upload { height: calc(80px + 22px); }
   h1 { font-size: 26px; }
   .round { width: 64px; height: 64px; }
   .round.big { width: 84px; height: 84px; }
   .stage.tall { width: min(100%, calc(62vh * 9 / 16)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
+  * { transition: none !important; }
+  .spinner .ring { animation-duration: 2.4s; }
 }

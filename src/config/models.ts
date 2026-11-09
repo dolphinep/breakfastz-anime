@@ -18,10 +18,14 @@ const model = (id: string, name: string, license: string): BundledModel => ({
 
 const VROID_CC0 = "CC0 · VRoid Studio sample by pixiv";
 
+const VROID_SAMPLE = "VRoid AvatarSample by pixiv · ใช้เชิงพาณิชย์ได้ ไม่ต้องให้เครดิต (ห้ามขายไฟล์)";
+
+/** the first one is the default and is preloaded with the page; the rest load when picked */
 export const MODELS: BundledModel[] = [
+  model("pixiv", "Mira", "VRM Public License 1.0 · pixiv Inc."),
+  model("ren", "Ren", VROID_SAMPLE),
   model("fumiriya", "Fumiriya", VROID_CC0),
   model("hairmale", "Kuro", VROID_CC0),
-  model("pixiv", "Mira", "VRM Public License 1.0 · pixiv Inc."),
   model("shibu", "Shibu", VROID_CC0),
   model("shino", "Shino", VROID_CC0),
 ];
